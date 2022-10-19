@@ -1,68 +1,51 @@
 #!/usr/bin/python3
-"""Tar, transfer, and deploy static html to webservers"""
+"""Create and distributes an archive to web servers"""
+import os.path
+import time
+from fabric.api import local
+from fabric.operations import env, put, run
 
-from fabric import api, decorators
-from fabric.contrib import files
-from datetime import datetime
-import os
+env.hosts = ['44.210.150.159', '35.173.47.15']
 
-api.env.hosts = ['holberton1', 'holberton3']
-api.env.hosts = ['142.44.167.235', '144.217.246.199']
-api.env.user = 'ubuntu'
-api.env.key_filename = '~/.ssh/holberton'
+
+def do_pack():
+    """Generate an tgz archive from web_static folder"""
+    try:
+        local("mkdir -p versions")
+        local("tar -cvzf versions/web_static_{}.tgz web_static/".
+              format(time.strftime("%Y%m%d%H%M%S")))
+        return ("versions/web_static_{}.tgz".format(time.
+                                                    strftime("%Y%m%d%H%M%S")))
+    except:
+        return None
+
+
+def do_deploy(archive_path):
+    """Distribute an archive to web servers"""
+    if (os.path.isfile(archive_path) is False):
+        return False
+
+    try:
+        file = archive_path.split("/")[-1]
+        folder = ("/data/web_static/releases/" + file.split(".")[0])
+        put(archive_path, "/tmp/")
+        run("mkdir -p {}".format(folder))
+        run("tar -xzf /tmp/{} -C {}".format(file, folder))
+        run("rm /tmp/{}".format(file))
+        run("mv {}/web_static/* {}/".format(folder, folder))
+        run("rm -rf {}/web_static".format(folder))
+        run('rm -rf /data/web_static/current')
+        run("ln -s {} /data/web_static/current".format(folder))
+        print("Deployment done")
+        return True
+    except:
+        return False
 
 
 def deploy():
-    """Wrapper function to pack html files into tarball and transfer
-    to web servers."""
-    return do_deploy(do_pack())
-
-@decorators.runs_once
-def do_pack():
-    """Function to create tarball of webstatic files from the web_static
-    folder in Airbnb_v2.
-    Returns: path of .tgz file on success, False otherwise
-    """
-    with api.settings(warn_only=True):
-        isdir = os.path.isdir('versions')
-        if not isdir:
-            mkdir = api.local('mkdir versions')
-            if mkdir.failed:
-                return False
-        suffix = datetime.now().strftime('%Y%m%d%M%S')
-        path = 'versions/web_static_{}.tgz'.format(suffix)
-        tar = api.local('tar -cvzf {} web_static'.format(path))
-        if tar.failed:
-            return False
-        size = os.stat(path).st_size
-        print('web_static packed: {} -> {}Bytes'.format(path, size))
-        return path
-
-def do_deploy(archive_path):
-    """Function to transfer `archive_path` to web servers.
-    Args:
-        archive_path (str): path of the .tgz file to transfer
-    Returns: True on success, False otherwise.
-    """
-    if not os.path.isfile(archive_path):
+    """Create and distributes an archive to web servers"""
+    try:
+        path = do_pack()
+        return do_deploy(path)
+    except:
         return False
-    with api.cd('/tmp'):
-        basename = os.path.basename(archive_path)
-        root, ext = os.path.splitext(basename)
-        outpath = '/data/web_static/releases/{}'.format(root)
-        try:
-            putpath = api.put(archive_path)
-            if files.exists(outpath):
-                api.run('rm -rdf {}'.format(outpath))
-            api.run('mkdir -p {}'.format(outpath))
-            api.run('tar -xzf {} -C {}'.format(putpath[0], outpath))
-            api.run('rm -f {}'.format(putpath[0]))
-            api.run('mv -u {}/web_static/* {}'.format(outpath, outpath))
-            api.run('rm -rf {}/web_static'.format(outpath))
-            api.run('rm -rf /data/web_static/current')
-            api.run('ln -s {} /data/web_static/current'.format(outpath))
-            print('New version deployed!')
-        except:
-            return False
-        else:
-            return True
